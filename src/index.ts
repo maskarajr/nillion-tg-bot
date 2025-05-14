@@ -1,6 +1,7 @@
 import express from 'express';
 import { Telegraf } from 'telegraf';
 import { config } from 'dotenv';
+import cors from 'cors';
 
 // Load environment variables
 config();
@@ -85,6 +86,15 @@ bot.command('userid', async (ctx) => {
   }
 });
 
+bot.command('groupid', async (ctx) => {
+  const chatId = ctx.chat?.id;
+  if (chatId) {
+    await ctx.reply(`This group's ID is: \`${chatId}\``, { parse_mode: 'Markdown' });
+  } else {
+    await ctx.reply('Could not retrieve the group ID.');
+  }
+});
+
 // Error handling
 bot.catch((err, ctx) => {
   console.error('Bot error:', err);
@@ -93,6 +103,7 @@ bot.catch((err, ctx) => {
 
 // Express app for HTTP endpoints
 const app = express();
+app.use(cors()); // Allow all origins for development
 
 // Health check endpoint
 app.get('/', (req, res) => res.send('Telegram bot is running!'));
