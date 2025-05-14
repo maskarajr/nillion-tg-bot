@@ -75,6 +75,16 @@ bot.command('status', async (ctx) => {
   }
 });
 
+bot.command('userid', async (ctx) => {
+  const userId = ctx.from?.id;
+  const username = ctx.from?.username || ctx.from?.first_name;
+  if (userId) {
+    await ctx.reply(`Your Telegram user ID is: \`${userId}\`\nUsername: @${username}`, { parse_mode: 'Markdown' });
+  } else {
+    await ctx.reply('Could not retrieve your user ID.');
+  }
+});
+
 // Error handling
 bot.catch((err, ctx) => {
   console.error('Bot error:', err);
