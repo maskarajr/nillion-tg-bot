@@ -95,6 +95,53 @@ bot.command('groupid', async (ctx) => {
   }
 });
 
+// Handler for when the bot is mentioned in a group and an admin tags a user
+bot.on('text', async (ctx) => {
+  // Only respond in groups
+  if (ctx.chat?.type !== 'group' && ctx.chat?.type !== 'supergroup') return;
+
+  const botInfo = await ctx.telegram.getMe();
+  const botMention = `@${botInfo.username}`;
+
+  // Check if the message mentions the bot
+  if (ctx.message?.text?.includes(botMention)) {
+    // Check if sender is admin
+    const admins = await ctx.getChatAdministrators();
+    const isAdmin = admins.some(admin => admin.user.id === ctx.from?.id);
+    if (!isAdmin) {
+      return ctx.reply('Only group admins can use this command.');
+    }
+
+    // Find mentioned user (other than the bot)
+    const entities = ctx.message.entities || [];
+    let targetUserId = null;
+    let targetUsername = null;
+    for (const entity of entities) {
+      if (entity.type === 'text_mention' && entity.user && entity.user.id !== botInfo.id) {
+        targetUserId = entity.user.id;
+        targetUsername = entity.user.username || entity.user.first_name;
+        break;
+      }
+      if (entity.type === 'mention' && ctx.message.text) {
+        const mentioned = ctx.message.text.substring(entity.offset, entity.offset + entity.length);
+        if (mentioned !== botMention) {
+          // Try to resolve username to userId (Telegram API does not provide this directly)
+          // So just show the username
+          targetUsername = mentioned;
+        }
+      }
+    }
+
+    if (targetUserId) {
+      await ctx.reply(`User @${targetUsername || 'unknown'} has Telegram user ID: ${targetUserId}`);
+    } else if (targetUsername) {
+      await ctx.reply(`Username ${targetUsername} was mentioned, but Telegram does not allow bots to resolve user IDs from @username mentions unless the user has interacted with the bot.`);
+    } else {
+      await ctx.reply('Please tag a user (not just the bot) to get their user ID.');
+    }
+  }
+});
+
 // Error handling
 bot.catch((err, ctx) => {
   console.error('Bot error:', err);
@@ -113,15 +160,29 @@ app.get('/api/verify', async (req, res) => {
   const { userId, username, groupId } = req.query;
   try {
     let chatMember;
-    if (userId) {
-      chatMember = await bot.telegram.getChatMember(groupId as string, Number(userId));
-    } else if (username) {
-      // Telegram API does not support searching by username directly
-      return res.status(400).json({ error: 'Telegram API does not support searching by username directly. Please provide userId.' });
-    } else {
-      return res.status(400).json({ error: 'Provide userId or username' });
+    let resolvedUserId = userId ? Number(userId) : undefined;
+    if (!userId && username) {
+      // Remove leading @ if present
+      const cleanUsername = (username as string).replace(/^@/, '');
+      try {
+        // Try to get the user by username using getChatMember (with @username)
+        chatMember = await bot.telegram.getChatMember(groupId as string, `@${cleanUsername}` as any);
+        resolvedUserId = chatMember.user.id;
+      } catch (e) {
+        // If not found, try to find among group admins
+        const admins = await bot.telegram.getChatAdministrators(groupId as string);
+        const admin = admins.find(a => a.user.username && a.user.username.toLowerCase() === cleanUsername.toLowerCase());
+        if (admin) {
+          resolvedUserId = admin.user.id;
+        } else {
+          return res.status(404).json({ exists: false, error: 'User not found in group or among admins.' });
+        }
+      }
     }
-
+    // Only call getChatMember with a number for userId and only if we haven't already found chatMember
+    if (!chatMember && resolvedUserId !== undefined && typeof resolvedUserId === 'number') {
+      chatMember = await bot.telegram.getChatMember(groupId as string, resolvedUserId);
+    }
     if (chatMember) {
       res.json({ exists: true, userId: chatMember.user.id, username: chatMember.user.username, status: chatMember.status });
     } else {
